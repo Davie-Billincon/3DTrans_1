@@ -58,6 +58,8 @@
     [self testTwoInit];
     [self testThreeInit];
     [self testFiveInit];
+    
+    [self testFour2Init];
 }
 
 - (void) viewWillAppear:(BOOL)animated {
@@ -68,6 +70,8 @@
     [self testFive];
     [self testSix];
     [self testSeven];
+    
+    [self testFour_2];
 }
 
 - (void) basicInit{
@@ -235,22 +239,55 @@
 
 
 
-//实验四可得
+//实验四 + 四2号 可得
 /**
     1. 平移变换：
         3维不动 、m43 = 平移距离 、m34 = 透视参数
         上面已知：1/m34 = 实际奇点距离
-        也就是说，在 m43 = 奇点距离 时，图像缩放为 0
-             且，在 m43 = 0 时，图像缩放为 1
-        所以：-（m43 / 1/m34 - 1） = 放大倍数f
-             放大倍数 = -m43 * m34 + 1
-    2. 3维任意变换
-        3维变换不动 、m44为1
-        每行对应的 ?4 = ?3 * 透视参数
-        若是有多个透视参数，则 ?4 = ?1 * m14  +  ?2 * m24  +  ?3 * m34 
+        也就是说，在 m43 = 奇点距离 时，图像缩放为 0 ，且在 m43 = 0 时，图像缩放为 1，m43 > 0 时按比例递增
+        所以：（1/m34 - m43） /  1/m34  = 放大倍数 = 1 - m43 * m34
+        经研究发现，官方透视算法是倒过来的：
+            当 m43 < 0 时，在 -m43 情况时图像放大多少，那么m43时就缩小多少，这样就能无限缩小，比如在 444 时缩小为0.5
+            当 m43 > 0 时，在 -m43 情况时图像缩小多少，那么m43时就放大多少，这样在 444 时会得到无限放大
+        所以：放大倍数为 = 1 / (1 + m43 * m34)  （可以看出，这是个 向左偏移1/k的 1/x * 1/k 函数）
+        所以： m44 = 1 + m43 * m34
+        总结： - 奇点距离 = 观察点
+        拓展：对于非坐标轴透视，应该是取平移向量在透视向量上的投影，然后使用上述算式中的距离计算公式
     3. 放大缩小变换
-        1/m44 * 3维矩阵所有参数
-        m44 置为1
+        m44 为1
+        根据传入参数，分别乘前3行
+    2. 3维任意变换后的透视变换
+        3维变换不动，且m44为1
+        若是有多个透视参数，则 n 行的 n4 = n1 * m14原参  +  n2 * m24原参  +  n3 * m34原参
+        我怀疑：每次透视变换，都通过 透视原值 = m34 / m33 来获取原值，而对于非坐标轴透视情况，那就是解方程了
+ **/
+/**
+    矩阵变换计算过程猜想（应该是对的了，需要testFour2更全面的测试，测试用例太多）
+    0. 缩放变换：将 x ,y ,z 分别乘前 3 行即可
+    1. 旋转变换：
+        仅仅是变换 3 维坐标的部分，不影响其他变换，变换完后，会根据 透视原参 设定 ?4 的值
+        且是 【原3维】 * 【运动后3维】 = 【新3维】
+    2. 旋转后透视变换：是通过解方程来获取原值的 (仅 Z 透视的话，就是 m34 / m33 ），然后通过上面旋转后算式设定 ?4 的值
+            a1 * x + a2 * y + a3 * z = a4
+            b1 * x + b2 * y + b3 * z = b4
+            c1 * x + c2 * y + c3 * z = c4
+        解得（不会无解，因为原3维矩阵本身就是线性无关的，不会多个解，因为线性无关）(下列算式实验失败)：
+            D = a1b2c3 + a2b3c1 + a3b1c2 - a3b2c1 - a1b3c2 - a2b1c3 0
+            X = a4b2c3 + a2b3c4 + a3b4c2 - a3b2c4 - a4b3c2 - a2b4c3
+            Y = a1b4c3 + a4b3c1 + a3b1c4 - a3b4c1 - a4b1c3 - a1b3c4
+            Z = a1b2c4 + a2b4c1 + a4b1c2 - a4b2c1 - a2b1c4 - a1b4c2
+            x=X/D ; y=Y/D ; z=Z/D
+        缩放会影响整行，所以上述方程在各种变换后，解出的值不变
+        若是变换中途更改 m34 呢？
+    3. 平移变换：
+        设平移为【a,b,c】  将 【a,b,c】 * 【3维矩阵】得到的数赋值到 m41,m42,m43 上
+        然后计算透视缩放
+        因为平移是在矩阵运动完后的基础上进行的，上述式子实际就是：获得 【在运动后容器空间中的平移向量】* 【运动后容器表达】= 【平移向量在标准空间中的表达】
+    4. 平移后透视缩放：还是需要求得透视原值
+        然后： m44 = （ 透视向量长 + 平移向量在透视向量上的投影(有正负) ） / 透视向量长
+        好像涉及到叉乘
+        反正 Z 轴透视就是 m44 = 1 + m34 * 透视原值
+ 
  **/
 -(void) testFour{
     NSLog(@"------------------------透视计算探析------------------------------");
@@ -265,18 +302,32 @@
     [self printTransform:trans_1];
     
     trans_1 = CATransform3DIdentity;
-    //注意：透视属性的设定必须在变换计算之前，因为这样才会针对m34的值来计算不同的旋转变换
     trans_1.m34 = 4.5/-2000;
-    trans_1 = CATransform3DTranslate(trans_1, 0, 0, 0);
+    trans_1 = CATransform3DTranslate(trans_1, 0, 0, -200);
     NSLog(@"先赋值透视然后平移变换");
     [self printTransform:trans_1];
+    trans_1 = CATransform3DIdentity;
+    trans_1.m34 = 4.5/-2000;
+    trans_1 = CATransform3DTranslate(trans_1, 0, 0, 200);
+    NSLog(@"先赋值透视然后平移变换");
+    [self printTransform:trans_1];
+    trans_1 = CATransform3DIdentity;
+    trans_1.m34 = 4.5/-2000;
+    trans_1 = CATransform3DTranslate(trans_1, 0, 0, 300);
+    NSLog(@"先赋值透视然后平移变换");
+    [self printTransform:trans_1];
+    trans_1 = CATransform3DIdentity;
+    trans_1.m34 = 4.5/-2000;
+    trans_1 = CATransform3DTranslate(trans_1, 0, 0, 500);
+    NSLog(@"先赋值透视然后平移变换");
+    [self printTransform:trans_1];
+
     
     trans_1 = CATransform3DIdentity;
     trans_1.m34 = 4.5/-2000;
     trans_1 = CATransform3DRotate(trans_1,-45*M_PI/180, 0, 1, 0);
     NSLog(@"先赋值透视然后y轴逆时针旋转45°变换");
     [self printTransform:trans_1];
-    
     CATransform3D trans_2  = CATransform3DRotate(trans_1,45*M_PI/180, 1, 0, 0);
     NSLog(@"先赋值透视然后y轴逆时针旋转45° ， 然后X轴顺旋45°");
     [self printTransform:trans_2];
@@ -298,7 +349,163 @@
     NSLog(@"^^^^^^^^^^^^^^^^^^^^^^^透视计算探析^^^^^^^^^^^^^^^^^^^^^^^");
 }
 
+- (void) testFour2Init{
+    //每行2个方块，3个等宽分割线
+    CGFloat lineWidth = 15;
 
+    _sixLayer = [[CALayer alloc] init];
+    _sixLayer.bounds = CGRectMake(0, 0, (_screenWidth - lineWidth * 3)/2, (_screenWidth - lineWidth * 3)/2);
+
+    _sixLayer.anchorPoint = CGPointMake(0.5, 0.5);
+    _sixLayer.position = CGPointMake(lineWidth + (_screenWidth - lineWidth * 3)/4,lineWidth + (_screenWidth - lineWidth * 3)/2 + lineWidth + (_screenWidth - lineWidth * 3)/2 + lineWidth + (_screenWidth - lineWidth * 3)/4);
+
+    _sixLayer.backgroundColor = [UIColor colorWithRed:245/255.0 green:133/255.0 blue:13/255.0 alpha:0.5].CGColor;
+    _sixLayer.opacity = 0.6;
+
+    [_showView.layer addSublayer:_sixLayer];
+}
+
+//透视算法组合研究实验
+//呼应和依赖实验四，观察结果如下，观察结果总结回到 实验四 那边去看
+/**
+    1. 先透视 放大2倍 后 旋转：
+        会连带着，使得透视距离缩小，从而使得旋转时候的缩放效果更明显
+        这个性质和在透视情况下拉近物体，获得更强的透视效果的事实一致
+    2. 先放大2倍 后 透视旋转：
+        该情况下不会更改透视距离，使得透视产生的缩放比例和放大前一样
+        就像物体并没有拉近，仅仅是物体自身放大了2倍
+    3. 先透视旋转 然后 Z轴平移：
+        此时会沿着旋转后的Z轴平移
+    4. 先透视 Z轴平移 然后  旋转：
+        此时会放大，然后旋转，就像物体被拉近了一样，但是透视距离没有变
+        类似于“先放大2倍 后 透视旋转”的情况
+    5. 先 Z轴平移 然后  缩放：
+        平移标示没有被缩放
+    6. 先 缩放 然后 Z轴平移：
+        平移标示被缩放了
+    7. 透视 先y轴逆时针旋转45°  透视 然后X轴顺旋45°
+        虽然两个透视设置的值一样，但是和不二次设置的计算结果产生了偏差
+        说明解方程得出的 透视原值 出现了差错
+ **/
+- (void) testFour_2{
+    NSLog(@"------------------------透视 组合 探析------------------------------");
+    NSLog(@"目前有 4 种情况：透视设定 ，平移 ，缩放 ，旋转");
+    //不带透视分为(自己翻转顺序)：平移+缩放 、平移+旋转 、缩放+旋转
+    CATransform3D trans_1;
+    CATransform3D trans_2;
+    
+    NSLog(@"先 Z轴平移 然后  缩放  ");
+    trans_1 = CATransform3DIdentity;
+    trans_1 = CATransform3DTranslate(trans_1, 0, 0, 100);
+    [self printTransform:trans_1];
+    trans_1 = CATransform3DScale(trans_1, 2, 2, 2);
+    [self printTransform:trans_1];
+    
+    NSLog(@"先  缩放 然后 Z轴平移  ");
+    trans_1 = CATransform3DIdentity;
+    trans_1 = CATransform3DScale(trans_1, 2, 2, 2);
+    [self printTransform:trans_1];
+    trans_1 = CATransform3DTranslate(trans_1, 0, 0, 100);
+    [self printTransform:trans_1];
+    
+    NSLog(@"先 Z轴平移 然后  旋转  ");
+    trans_1 = CATransform3DIdentity;
+    trans_1 = CATransform3DTranslate(trans_1, 0, 0, 100);
+    [self printTransform:trans_1];
+    trans_1 = CATransform3DRotate(trans_1,-45*M_PI/180, 0, 1, 0);
+    [self printTransform:trans_1];
+    
+    NSLog(@"先  旋转 然后 Z轴平移  ");
+    trans_1 = CATransform3DIdentity;
+    trans_1 = CATransform3DRotate(trans_1,-45*M_PI/180, 0, 1, 0);
+    [self printTransform:trans_1];
+    trans_1 = CATransform3DTranslate(trans_1, 0, 0, 100);
+    [self printTransform:trans_1];
+    
+    NSLog(@"先 旋转 然后  缩放  ");
+    trans_1 = CATransform3DIdentity;
+    trans_1 = CATransform3DRotate(trans_1,-45*M_PI/180, 0, 1, 0);
+    [self printTransform:trans_1];
+    trans_1 = CATransform3DScale(trans_1, 2, 2, 2);
+    [self printTransform:trans_1];
+    
+    NSLog(@"先  缩放 然后 旋转  ");
+    trans_1 = CATransform3DIdentity;
+    trans_1 = CATransform3DScale(trans_1, 2, 2, 2);
+    [self printTransform:trans_1];
+    trans_1 = CATransform3DRotate(trans_1,-45*M_PI/180, 0, 1, 0);
+    [self printTransform:trans_1];
+    
+    
+    NSLog(@"透视 先 Z轴平移 然后  缩放  ");
+    trans_1 = CATransform3DIdentity;
+    trans_1.m34 = 4.5/-2000;
+    trans_1 = CATransform3DTranslate(trans_1, 0, 0, 100);
+    [self printTransform:trans_1];
+    trans_1 = CATransform3DScale(trans_1, 2, 2, 2);
+    [self printTransform:trans_1];
+    
+    NSLog(@"透视 先  缩放 然后 Z轴平移  ");
+    trans_1 = CATransform3DIdentity;
+    trans_1.m34 = 4.5/-2000;
+    trans_1 = CATransform3DScale(trans_1, 2, 2, 2);
+    [self printTransform:trans_1];
+    trans_1 = CATransform3DTranslate(trans_1, 0, 0, 100);
+    [self printTransform:trans_1];
+    
+    NSLog(@"透视 先 Z轴平移 然后  旋转  ");
+    trans_1 = CATransform3DIdentity;
+    trans_1.m34 = 4.5/-2000;
+    trans_1 = CATransform3DTranslate(trans_1, 0, 0, 100);
+    [self printTransform:trans_1];
+    trans_1 = CATransform3DRotate(trans_1,-45*M_PI/180, 0, 1, 0);
+    [self printTransform:trans_1];
+    
+    NSLog(@"透视 先  旋转 然后 Z轴平移  ");
+    trans_1 = CATransform3DIdentity;
+    trans_1.m34 = 4.5/-2000;
+    trans_1 = CATransform3DRotate(trans_1,-45*M_PI/180, 0, 1, 0);
+    [self printTransform:trans_1];
+    trans_1 = CATransform3DTranslate(trans_1, 0, 0, 100);
+    [self printTransform:trans_1];
+    
+    NSLog(@"透视 先 旋转 然后  缩放  ");
+    trans_1 = CATransform3DIdentity;
+    trans_1.m34 = 4.5/-2000;
+    trans_1 = CATransform3DRotate(trans_1,-45*M_PI/180, 0, 1, 0);
+    [self printTransform:trans_1];
+    trans_1 = CATransform3DScale(trans_1, 2, 2, 2);
+    [self printTransform:trans_1];
+    
+    NSLog(@"透视 先  缩放 然后 旋转  ");
+    trans_1 = CATransform3DIdentity;
+    trans_1.m34 = 4.5/-2000;
+    trans_1 = CATransform3DScale(trans_1, 2, 2, 2);
+    [self printTransform:trans_1];
+    trans_1 = CATransform3DRotate(trans_1,-45*M_PI/180, 0, 1, 0);
+    [self printTransform:trans_1];
+    
+    NSLog(@"透视 先y轴逆时针旋转45°  然后X轴顺旋45°");
+    trans_1 = CATransform3DIdentity;
+    trans_1.m34 = 4.5/-2000;
+    trans_1 = CATransform3DRotate(trans_1,-45*M_PI/180, 0, 1, 0);
+    [self printTransform:trans_1];
+    trans_2  = CATransform3DRotate(trans_1,45*M_PI/180, 1, 0, 0);
+    [self printTransform:trans_2];
+    
+    NSLog(@"透视 先y轴逆时针旋转45°  透视 然后X轴顺旋45°");
+    trans_1 = CATransform3DIdentity;
+    trans_1.m34 = 4.5/-2000;
+    trans_1 = CATransform3DRotate(trans_1,-45*M_PI/180, 0, 1, 0);
+    trans_1.m34 = 4.5/-2000;
+    [self printTransform:trans_1];
+    trans_2  = CATransform3DRotate(trans_1,45*M_PI/180, 1, 0, 0);
+    [self printTransform:trans_2];
+
+    //    dispatch_after( dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^(void){    _sixLayer.transform = trans_1;     });
+    //    dispatch_after( dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^(void){    _sixLayer.transform = trans_1;     });
+    NSLog(@"^^^^^^^^^^^^^^^^^^^^^^^透视 组合 计算探析^^^^^^^^^^^^^^^^^^^^^^^");
+}
 
 
 
@@ -407,17 +614,17 @@ void printTransform(CATransform3D trans){
     NSLog(@"-----------求逆循环随机测试-----------");
     CATransform3D trans_1 = CATransform3DIdentity;
     srand(time(0));
-//    NSLog(@"被注释掉了");
-    for(int i = 0;i < 20;i++){
-        NSLog(@"第 %d 次使用求逆测试函数：#############",i);
-        trans_1 = CATransform3DRotate(trans_1,(rand()%360 - 180)*M_PI/180, 1, 0, 0);
-        trans_1 = CATransform3DRotate(trans_1,(rand()%360 - 180)*M_PI/180, 0, 1, 0);
-        trans_1 = CATransform3DRotate(trans_1,(rand()%360 - 180)*M_PI/180, 0, 0, 1);
-            NSLog(@"该矩阵的原打印结果为");
-            printTrans(trans_1);
-//        matrix_testInverse_1((CATransform3D_my *)(&trans_1));
-        matrix_testInverse_2((CATransform3D_my *)(&trans_1));
-    }
+    NSLog(@"被注释掉了");
+//    for(int i = 0;i < 20;i++){
+//        NSLog(@"第 %d 次使用求逆测试函数：#############",i);
+//        trans_1 = CATransform3DRotate(trans_1,(rand()%360 - 180)*M_PI/180, 1, 0, 0);
+//        trans_1 = CATransform3DRotate(trans_1,(rand()%360 - 180)*M_PI/180, 0, 1, 0);
+//        trans_1 = CATransform3DRotate(trans_1,(rand()%360 - 180)*M_PI/180, 0, 0, 1);
+//            NSLog(@"该矩阵的原打印结果为");
+//            printTrans(trans_1);
+////        matrix_testInverse_1((CATransform3D_my *)(&trans_1));
+//        matrix_testInverse_2((CATransform3D_my *)(&trans_1));
+//    }
     NSLog(@"^^^^^^^^^^^^求逆循环随机测试^^^^^^^^^^^^");
     
     //开始测不同求逆函数的效率问题
@@ -490,21 +697,11 @@ void printTransform(CATransform3D trans){
     matrix_free(&identity);
 }
 
-//- (void) testSevenInit{
-//    //每行2个方块，3个等宽分割线
-//    CGFloat lineWidth = 15;
-//    
-//    _sixLayer = [[CALayer alloc] init];
-//    _sixLayer.bounds = CGRectMake(0, 0, (_screenWidth - lineWidth * 3)/2, (_screenWidth - lineWidth * 3)/2);
-//    
-//    _sixLayer.anchorPoint = CGPointMake(0.5, 0.5);
-//    _sixLayer.position = CGPointMake(lineWidth + (_screenWidth - lineWidth * 3)/4,lineWidth + (_screenWidth - lineWidth * 3)/2 + lineWidth + (_screenWidth - lineWidth * 3)/2 + lineWidth + (_screenWidth - lineWidth * 3)/4);
-//    
-//    _sixLayer.backgroundColor = [UIColor colorWithRed:245/255.0 green:133/255.0 blue:13/255.0 alpha:0.5].CGColor;
-//    _sixLayer.opacity = 0.6;
-//    
-//    [_showView.layer addSublayer:_sixLayer];
-//}
+
+
+
+
+
 
 
 @end

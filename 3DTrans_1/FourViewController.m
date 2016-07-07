@@ -16,6 +16,7 @@
     
     [self basicInit];
     [self layerInit];
+    [self otherLayerInit];
     [self reinControlInit];
     
 }
@@ -39,7 +40,21 @@
     matrix_initWithNM(&_zhudongSpace_forInverse,3,3);
     matrix_initWithNM(&_yundongContainer,3,3);
     matrix_initWithNM(&_multiplyResult,3,3);
-    _trans = CATransform3DIdentity;
+    _trans = CATransform3DIdentity;             //需要初始化，因为后面的转换赋值并不会改变最后一行
+    
+    // XOZ / YOZ 初始计算用矩阵初始化
+    matrix_initWithNM(&_XOZOrigin,3,3);
+    matrix_initWithNM(&_YOZOrigin,3,3);
+    
+    CATransform3D trans_1 = CATransform3DIdentity;
+    trans_1 = CATransform3DRotate(trans_1,-90*M_PI/180, 1, 0, 0);   //获取初始状态矩阵
+    matrix_trans3DToThreeMatrix((CATransform3D_my *)&trans_1,&_XOZOrigin);   //将初始矩阵转化为线性可用矩阵
+    
+    trans_1 = CATransform3DIdentity;
+    trans_1 = CATransform3DRotate(trans_1,-90*M_PI/180, 0, 1, 0);   //获取初始状态矩阵
+    matrix_trans3DToThreeMatrix((CATransform3D_my *)&trans_1,&_YOZOrigin);   //将初始矩阵转化为线性可用矩阵
+    _trans_2 = CATransform3DIdentity;             //需要初始化，因为后面的转换赋值并不会改变最后一行
+    _trans_3 = CATransform3DIdentity;             //需要初始化，因为后面的转换赋值并不会改变最后一行
 }
 
 -(void) reinControlInit{
@@ -59,7 +74,7 @@
     
     rein.reinHandlerPanForIndicator = ^(UIPanGestureRecognizer *reinPan,CGPoint virPoint){
         NSLog(@"滑动时的虚拟坐标为：%0.2f    %0.2f",virPoint.x,virPoint.y);
-        [self changeTransWitnZX:virPoint.x withZY:-virPoint.y withZZ:_indicator.virWidth * 0.3];
+        [self changeTransWitnZX:virPoint.x withZY:-virPoint.y withZZ:40];
     };
     
     rein.reinHandlerTouchDown = ^(CGPoint location,UIView *locateView){
@@ -85,10 +100,10 @@
     _orangeLayer.position = CGPointMake(_screenWidth/2, _screenHeight/2);
     
     _orangeLayer.backgroundColor = [UIColor colorWithRed:245/255.0 green:133/255.0 blue:13/255.0 alpha:1.0].CGColor;
-    _orangeLayer.opacity = 0.8;
+    _orangeLayer.opacity = 0.7;
     
     [_showView.layer addSublayer:_orangeLayer];
-    NSLog(@"目前showView.rootLayer的子layer数为：%lu",[_showView.layer.sublayers count]);
+
     
     //灰色标准空间图层
     _grayLayer = [[CALayer alloc] init];
@@ -99,11 +114,57 @@
     _grayLayer.anchorPoint = CGPointMake(0.5, 0.5);
     _grayLayer.position = CGPointMake(_screenWidth/2, _screenHeight/2);
     
-    _grayLayer.backgroundColor = [UIColor colorWithRed:100/255.0 green:100/255.0 blue:100/255.0 alpha:0.5].CGColor;
-    _grayLayer.opacity = 0.5;
+    _grayLayer.backgroundColor = [UIColor colorWithRed:100/255.0 green:100/255.0 blue:100/255.0 alpha:1.0].CGColor;
+    _grayLayer.opacity = 0.4;
     
     [_showView.layer addSublayer:_grayLayer];
 }
+
+-(void) otherLayerInit{
+    CATransform3D trans_1;
+    
+    //X0Z图层
+    _XOZLayer = [[CALayer alloc] init];
+    
+    CGRect rect = CGRectMake(0, 0, 250, 250);
+    _XOZLayer.bounds = rect;
+    
+    _XOZLayer.anchorPoint = CGPointMake(0.5, 0.5);
+    _XOZLayer.position = CGPointMake(_screenWidth/2, _screenHeight/2);
+    
+    _XOZLayer.backgroundColor = [UIColor colorWithRed:242/255.0 green:248/255.0 blue:88/255.0 alpha:1.0].CGColor;
+    _XOZLayer.opacity = 0.7;
+    
+    trans_1 = CATransform3DIdentity;
+    trans_1.m34 = 4.5/-2000;
+    trans_1 = CATransform3DRotate(trans_1,-90*M_PI/180, 1, 0, 0);
+    _XOZLayer.transform = trans_1;
+    
+    [_showView.layer addSublayer:_XOZLayer];
+
+    
+    //YOZ图层
+    _YOZLayer = [[CALayer alloc] init];
+    
+    CGRect gray_rect = CGRectMake(0, 0, 250, 250);
+    _YOZLayer.bounds = gray_rect;
+    
+    _YOZLayer.anchorPoint = CGPointMake(0.5, 0.5);
+    _YOZLayer.position = CGPointMake(_screenWidth/2, _screenHeight/2);
+    
+    _YOZLayer.backgroundColor = [UIColor colorWithRed:110/255.0 green:249/255.0 blue:237/255.0 alpha:0.5].CGColor;
+    _YOZLayer.opacity = 0.7;
+    
+    trans_1 = CATransform3DIdentity;
+    trans_1.m34 = 4.5/-2000;
+    trans_1 = CATransform3DRotate(trans_1,-90*M_PI/180, 0, 1, 0);
+    _YOZLayer.transform = trans_1;
+    
+    [_showView.layer addSublayer:_YOZLayer];
+}
+
+
+
 
 //根据传入的Z轴坐标进行layer的矩阵变幻
 -(void) changeTransWitnZX:(CGFloat)a withZY:(CGFloat)b withZZ:(CGFloat)c{
@@ -130,15 +191,28 @@
     matrix_multiply_unsafe(&_zhudongSpace_forInverse,&_yundongContainer,&_multiplyResult);
     
     //【运动后-标准容器在主动空间的表述】*【主动在标准空间的表述】=【运动后-标准容器在标准空间的表述】
+    // 选定 _yundongContainer 为最后结果容器
     matrix_multiply_unsafe(&_multiplyResult,&_zhudongSpace,&_yundongContainer);
     
+    //将结果放到 3D矩阵中 ，并完成透视计算
     matrix_transThreeMatrixTo3D((CATransform3D_my *)&_trans,&_yundongContainer);
-    
     makeToushiWithZ(&_trans,-4.5/2000);
     
+    //计算XOZ 、YOZ 上的偏转，使用 _multiplyResult 做结果容器
+    matrix_multiply_unsafe(&_XOZOrigin,&_yundongContainer,&_multiplyResult); //将这个初始矩阵 乘 随动变换结果
+    matrix_transThreeMatrixTo3D((CATransform3D_my *)&_trans_2,&_multiplyResult);
+    makeToushiWithZ(&_trans_2,-4.5/2000);
+    
+    matrix_multiply_unsafe(&_YOZOrigin,&_yundongContainer,&_multiplyResult); //将这个初始矩阵 乘 随动变换结果
+    matrix_transThreeMatrixTo3D((CATransform3D_my *)&_trans_3,&_multiplyResult);
+    makeToushiWithZ(&_trans_3,-4.5/2000);
+    
+    //将临时矩阵赋值到layer，完成动画
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     _orangeLayer.transform = _trans;
+    _XOZLayer.transform = _trans_2;
+    _YOZLayer.transform = _trans_3;
     [CATransaction commit];
 }
 
@@ -147,6 +221,8 @@
     matrix_free(&_zhudongSpace_forInverse);
     matrix_free(&_yundongContainer);
     matrix_free(&_multiplyResult);
+    matrix_free(&_XOZOrigin);
+    matrix_free(&_YOZOrigin);
 }
 
 
